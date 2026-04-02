@@ -1,0 +1,54 @@
+.alog-page {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; position: relative; overflow: hidden;
+  background: var(--bg);
+}
+.alog-bg {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 40%, rgba(245,158,11,0.07) 0%, transparent 65%);
+  pointer-events: none;
+}
+.alog-card {
+  position: relative; z-index: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--orange);
+  border-radius: var(--radius-lg);
+  padding: 48px 44px;
+  width: 100%; max-width: 420px;
+  animation: fadeUp 0.5s ease both;
+}
+.alog-logo { margin-bottom: 32px; }
+.alog-card h1 {
+  font-family: var(--font-display);
+  font-size: 34px; font-weight: 400;
+  text-transform: uppercase; color: var(--text);
+  margin-bottom: 6px;
+}
+.alog-card p { font-size: 14px; color: var(--text-2); margin-bottom: 28px; }
+
+.alog-form { display: flex; flex-direction: column; gap: 16px; }
+.alog-field { display: flex; flex-direction: column; gap: 6px; }
+.alog-field label {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-2);
+}
+.alog-field input {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px;
+  color: var(--text); font-size: 14px; outline: none;
+  transition: border-color 0.2s;
+}
+.alog-field input:focus { border-color: var(--orange); }
+.alog-error {
+  padding: 12px 14px;
+  background: rgba(220,38,38,0.08);
+  border: 1px solid rgba(220,38,38,0.25);
+  border-radius: var(--radius);
+  font-size: 13px; color: #ef4444;
+}
+.alog-btn { width: 100%; justify-content: center; padding: 14px; margin-top: 4px; }
+.alog-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
