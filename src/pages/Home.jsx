@@ -1,25 +1,29 @@
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { BRAND, PACKAGES } from '../lib/supabase'
+import { fetchPackages, BRAND } from '../lib/supabase'
 import './Home.css'
 
 const WHY = [
-  { icon: '🎯', title: 'Expert Posing Guidance',   desc: 'No experience needed — you\'ll be directed every step of the way for natural, confident results.' },
+  { icon: '🎯', title: 'Expert Posing Guidance',   desc: "No experience needed — you'll be directed every step of the way for natural, confident results." },
   { icon: '✨', title: 'High-End Retouching',       desc: 'Clean, modern edits with professional retouching included in every package.' },
   { icon: '⚡', title: 'Fast Turnaround',           desc: '3–7 days for studio sessions, 7–14 days for events. Delivered via private gallery link.' },
   { icon: '📍', title: 'London Based',              desc: 'Studio & on-location shoots across London. Available UK-wide for weddings and events.' },
 ]
 
-const FEATURED = [
-  { id: 'elite-portrait', badge: '🔥 Most Popular' },
-  { id: 'elite-family',   badge: '❤️ Perfect for Families' },
-  { id: 'elite-street',   badge: '🏙️ Bold & Creative' },
-]
-
 export default function Home() {
-  const featured = FEATURED.map(f => ({
-    ...PACKAGES.find(p => p.id === f.id),
-    badge: f.badge,
-  }))
+  const [packages, setPackages]     = useState([])
+  const [pkgLoading, setPkgLoading] = useState(true)
+
+  useEffect(() => {
+    fetchPackages().then(data => {
+      setPackages(data)
+      setPkgLoading(false)
+    })
+  }, [])
+
+  // Show top 3 popular-flagged packages, falling back to first 3
+  const featured = packages.filter(p => p.popular).slice(0, 3)
+  const display  = featured.length >= 3 ? featured : packages.slice(0, 3)
 
   return (
     <div className="home">
@@ -46,17 +50,11 @@ export default function Home() {
             <Link to="/catalogue" className="btn-outline">View Portfolio</Link>
           </div>
           <div className="hero__stats fu4">
-            <div className="hero__stat">
-              <strong>5+</strong><span>Years Experience</span>
-            </div>
+            <div className="hero__stat"><strong>5+</strong><span>Years Experience</span></div>
             <div className="hero__divider" />
-            <div className="hero__stat">
-              <strong>500+</strong><span>Happy Clients</span>
-            </div>
+            <div className="hero__stat"><strong>500+</strong><span>Happy Clients</span></div>
             <div className="hero__divider" />
-            <div className="hero__stat">
-              <strong>8</strong><span>Session Types</span>
-            </div>
+            <div className="hero__stat"><strong>{pkgLoading ? '…' : packages.length}</strong><span>Session Types</span></div>
           </div>
         </div>
         <div className="hero__scroll">
@@ -69,7 +67,7 @@ export default function Home() {
       <div className="marquee">
         <div className="marquee__track">
           {['Weddings','Portraits','Family','Maternity','Street','Events','Commercial','Branding',
-            'Weddings','Portraits','Family','Maternity','Street','Events','Commercial','Branding'].map((t,i) => (
+            'Weddings','Portraits','Family','Maternity','Street','Events','Commercial','Branding'].map((t, i) => (
             <span key={i}>{t} <em>◆</em></span>
           ))}
         </div>
@@ -81,29 +79,43 @@ export default function Home() {
           <div className="section-head">
             <p className="label">Popular Packages</p>
             <h2 className="section-title">Choose Your Session</h2>
-            <p className="section-sub">From quick portraits to immersive elite sessions — every package includes professional editing and expert guidance.</p>
+            <p className="section-sub">Every package includes professional editing and expert posing guidance — no experience needed.</p>
           </div>
-          <div className="feat-grid">
-            {featured.map(pkg => (
-              <div key={pkg.id} className="feat-card">
-                <div className="feat-card__badge">{pkg.badge}</div>
-                <div className="feat-card__emoji">{pkg.emoji}</div>
-                <h3>{pkg.name}</h3>
-                <p>{pkg.desc}</p>
-                <div className="feat-card__meta">
-                  <span>⏱ {pkg.duration}</span>
-                  <span>📷 {pkg.images} edited images</span>
-                  <span>👔 {pkg.outfits} outfit{pkg.outfits > 1 ? 's' : ''}</span>
+
+          {pkgLoading ? (
+            <div className="feat-grid">
+              {Array(3).fill(0).map((_, i) => (
+                <div key={i} className="skeleton" style={{ height: 340, borderRadius: 10 }} />
+              ))}
+            </div>
+          ) : display.length === 0 ? (
+            <p style={{ textAlign:'center', color:'var(--text-2)', padding:'40px 0' }}>
+              Packages coming soon — <Link to="/booking" style={{ color:'var(--orange)' }}>get in touch</Link> to enquire.
+            </p>
+          ) : (
+            <div className="feat-grid">
+              {display.map(pkg => (
+                <div key={pkg.id} className="feat-card">
+                  {pkg.popular && <div className="feat-card__badge">🔥 Most Popular</div>}
+                  <div className="feat-card__emoji">{pkg.emoji || '📸'}</div>
+                  <h3>{pkg.name}</h3>
+                  <p>{pkg.description}</p>
+                  <div className="feat-card__meta">
+                    {pkg.duration && <span>⏱ {pkg.duration}</span>}
+                    {pkg.images   && <span>📷 {pkg.images} edited images</span>}
+                    {pkg.outfits  && <span>👔 {pkg.outfits} outfit{pkg.outfits > 1 ? 's' : ''}</span>}
+                  </div>
+                  <div className="feat-card__footer">
+                    <strong className="feat-card__price">£{pkg.price}</strong>
+                    <Link to={`/booking?package=${pkg.id}`} className="btn-primary">Book This</Link>
+                  </div>
                 </div>
-                <div className="feat-card__footer">
-                  <strong className="feat-card__price">£{pkg.price}</strong>
-                  <Link to={`/booking?package=${pkg.id}`} className="btn-primary">Book This</Link>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
+
           <div className="feat-cta">
-            <Link to="/booking" className="btn-outline">See All 8 Packages →</Link>
+            <Link to="/booking" className="btn-outline">See All {packages.length > 0 ? packages.length : ''} Packages →</Link>
           </div>
         </div>
       </section>
@@ -118,15 +130,13 @@ export default function Home() {
               Every session is crafted to make you feel at ease, look your best, and leave with images that truly represent who you are.
             </p>
             <div className="why-photographer">
-              <div className="why-photographer__avatar">
-                <span>GO</span>
-              </div>
+              <div className="why-photographer__avatar"><span>GO</span></div>
               <div>
-                <strong>Gbolahan Ogundipe</strong>
-                <span>Lead Photographer · 5 Years Experience</span>
+                <strong>{BRAND.photographer}</strong>
+                <span>Lead Photographer · {BRAND.experience} Experience</span>
               </div>
             </div>
-            <Link to="/booking" className="btn-primary" style={{ marginTop: 8, alignSelf: 'flex-start' }}>
+            <Link to="/booking" className="btn-primary" style={{ alignSelf:'flex-start' }}>
               Work With Me
             </Link>
           </div>
