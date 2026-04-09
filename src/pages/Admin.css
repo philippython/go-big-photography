@@ -439,3 +439,17 @@
   .pkg-admin-row { flex-direction: column; align-items: flex-start; }
   .pkg-admin-row__actions { width: 100%; justify-content: flex-start; }
 }
+
+/* Delete booking button */
+.adm__btn-delete-booking {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 4px;
+  background: rgba(220,38,38,0.08); color: #f87171;
+  font-family: var(--font-body); font-size: 12px; font-weight: 700;
+  padding: 7px 14px; border-radius: var(--radius);
+  border: 1px solid rgba(220,38,38,0.2); cursor: pointer;
+  transition: all 0.2s; white-space: nowrap;
+}
+.adm__btn-delete-booking:hover {
+  background: var(--red); color: white; border-color: var(--red);
+}

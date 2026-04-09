@@ -2,7 +2,15 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase, fetchPackages, BRAND } from '../lib/supabase'
 import { format, addDays } from 'date-fns'
+import emailjs from '@emailjs/browser'
+import StripeCheckout from '../components/StripeCheckout'
+import { bookingConfirmHTML } from '../lib/emailTemplates'
+import DatePicker from '../components/DatePicker'
 import './Booking.css'
+
+const EMAILJS_SERVICE_ID       = import.meta.env.VITE_EMAILJS_SERVICE_ID
+const EMAILJS_CONFIRM_TEMPLATE = import.meta.env.VITE_EMAILJS_CONFIRM_TEMPLATE
+const EMAILJS_PUBLIC_KEY       = import.meta.env.VITE_EMAILJS_PUBLIC_KEY
 
 const INIT = {
   name: '', email: '', phone: '',
@@ -19,14 +27,22 @@ export default function Booking() {
   const [packages, setPackages] = useState([])
   const [pkgLoading, setPkgLoading] = useState(true)
   const [filter, setFilter]     = useState('all')
+  const [savedBooking, setSavedBooking]   = useState(null)
+  const [bookedDates, setBookedDates]     = useState([])
 
-  // Load packages from Supabase
   useEffect(() => {
     fetchPackages().then(data => { setPackages(data); setPkgLoading(false) })
+    // Fetch all booked dates to disable them in the date picker
+    supabase
+      .from('bookings')
+      .select('preferred_date')
+      .not('preferred_date', 'is', null)
+      .not('status', 'in', '(cancelled,declined)')
+      .then(({ data }) => {
+        if (data) setBookedDates(data.map(b => b.preferred_date))
+      })
   }, [])
 
-  // Pre-select package from URL ?package=id
-  // Also resets to step 1 and scrolls to top when package param changes
   useEffect(() => {
     const pre = searchParams.get('package')
     if (pre) {
@@ -38,9 +54,6 @@ export default function Booking() {
     }
   }, [searchParams])
 
-  const minDate = format(addDays(new Date(), 2), 'yyyy-MM-dd')
-
-  // Unique category list from loaded packages
   const categories = ['all', ...new Set(packages.map(p => p.category).filter(Boolean))]
   const filtered   = filter === 'all' ? packages : packages.filter(p => p.category === filter)
   const chosen     = packages.find(p => p.id === form.package_id)
@@ -53,12 +66,58 @@ export default function Booking() {
 
   function validate() {
     const e = {}
-    if (!form.package_id)   e.package_id    = 'Please select a session package'
-    if (!form.name.trim())  e.name          = 'Your name is required'
+    if (!form.package_id)   e.package_id     = 'Please select a session package'
+    if (!form.name.trim())  e.name           = 'Your name is required'
     if (!form.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
-                            e.email         = 'Valid email is required'
+                            e.email          = 'Valid email is required'
     if (!form.preferred_date) e.preferred_date = 'Please choose a preferred date'
     return e
+  }
+
+  async function sendConfirmEmail(pkg) {
+    const data = {
+      client_name:    form.name,
+      client_email:   form.email,
+      package_name:   pkg?.name  || form.package_id,
+      package_price:  pkg?.price || '—',
+      deposit_due:    pkg?.price ? Math.round(pkg.price * 0.5) : '—',
+      preferred_date: form.preferred_date
+        ? format(new Date(form.preferred_date), 'd MMMM yyyy')
+        : '—',
+      location:       form.location || '—',
+    }
+
+    try {
+      // Send booking confirmation to client only
+      // NOTE: In your EmailJS template, set the "To Email" field to {{to_email}}
+      await emailjs.send(
+        EMAILJS_SERVICE_ID,
+        EMAILJS_CONFIRM_TEMPLATE,
+        {
+          // Recipient — must match your EmailJS template "To Email" field exactly
+          to_email:       data.client_email,
+          to_name:        data.client_name,
+          reply_to:       data.client_email,
+          // Content
+          subject:        `Booking received — GoBig Photography`,
+          html_body:      bookingConfirmHTML(data),
+          // Plain text fallbacks
+          client_name:    data.client_name,
+          client_email:   data.client_email,
+          package_name:   data.package_name,
+          package_price:  data.package_price,
+          deposit_due:    data.deposit_due,
+          preferred_date: data.preferred_date,
+          location:       data.location,
+        },
+        EMAILJS_PUBLIC_KEY
+      )
+      console.log('Confirmation email sent to', data.client_email)
+      return true
+    } catch (err) {
+      console.error('EmailJS confirm error:', err.text || err.message || err)
+      return false
+    }
   }
 
   async function submit(e) {
@@ -68,6 +127,8 @@ export default function Booking() {
 
     setStatus('loading')
     const pkg = chosen
+
+    // Save booking to Supabase
     const { error } = await supabase.from('bookings').insert([{
       ...form,
       package_name:  pkg?.name  || form.package_id,
@@ -77,8 +138,23 @@ export default function Booking() {
       status:        'new',
     }])
 
-    if (error) { console.error(error); setStatus('error') }
-    else        setStatus('success')
+    if (error) {
+      console.error(error)
+      setStatus('error')
+      return
+    }
+
+    // Get the saved booking id for Stripe metadata
+    const { data: saved } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('email', form.email)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()  // won't throw 406 if row not found
+
+    setSavedBooking(saved || {})
+    setStatus('payment') // go to payment step
   }
 
   if (status === 'success') return <BookingSuccess form={form} chosen={chosen} />
@@ -93,10 +169,9 @@ export default function Booking() {
         </div>
       </div>
 
-      {/* Step indicator */}
       <div className="book-steps">
         <div className="wrap book-steps__inner">
-          {['Choose Package', 'Your Details', 'Confirm'].map((s, i) => (
+          {['Choose Package', 'Your Details', 'Confirm', 'Pay Deposit'].map((s, i) => (
             <button
               key={i}
               className={`book-step ${step === i+1 ? 'active' : ''} ${step > i+1 ? 'done' : ''}`}
@@ -111,14 +186,13 @@ export default function Booking() {
 
       <form className="book-body wrap" onSubmit={submit} noValidate>
 
-        {/* ── STEP 1: Choose Package ── */}
+        {/* ── STEP 1 ── */}
         {step === 1 && (
           <div className="book-step1">
             {errors.package_id && (
               <p className="field-error" style={{ marginBottom: 14 }}>{errors.package_id}</p>
             )}
 
-            {/* Category filter */}
             <div className="pkg-filter">
               {categories.map(c => (
                 <button type="button" key={c}
@@ -137,7 +211,7 @@ export default function Booking() {
                 ))}
               </div>
             ) : filtered.length === 0 ? (
-              <div className="pkg-empty">No packages available right now. Check back soon!</div>
+              <div className="pkg-empty">No packages available right now.</div>
             ) : (
               <div className="pkg-grid">
                 {filtered.map(pkg => (
@@ -181,7 +255,7 @@ export default function Booking() {
           </div>
         )}
 
-        {/* ── STEP 2: Details ── */}
+        {/* ── STEP 2 ── */}
         {step === 2 && (
           <div className="book-step2">
             <div className="book-layout">
@@ -208,14 +282,22 @@ export default function Booking() {
                   </div>
                   <div className={`fg ${errors.preferred_date ? 'err' : ''}`}>
                     <label>Preferred Date *</label>
-                    <input name="preferred_date" type="date" min={minDate} value={form.preferred_date} onChange={handle} />
-                    {errors.preferred_date && <span className="field-error">{errors.preferred_date}</span>}
+                    <DatePicker
+                      value={form.preferred_date}
+                      onChange={(date) => {
+                        setForm(f => ({ ...f, preferred_date: date }))
+                        if (errors.preferred_date) setErrors(e => ({ ...e, preferred_date: '' }))
+                      }}
+                      bookedDates={bookedDates}
+                      minDaysAhead={2}
+                    />
+                    {errors.preferred_date && <span className="field-error" style={{ marginTop: 4 }}>{errors.preferred_date}</span>}
                   </div>
                 </div>
 
                 <div className="fg">
                   <label>Shoot Location / Venue</label>
-                  <input name="location" value={form.location} onChange={handle} placeholder="e.g. Shoreditch, London or specific venue" />
+                  <input name="location" value={form.location} onChange={handle} placeholder="e.g. Shoreditch, London" />
                 </div>
 
                 <div className="fg">
@@ -256,14 +338,14 @@ export default function Booking() {
           </div>
         )}
 
-        {/* ── STEP 3: Confirm ── */}
+        {/* ── STEP 3 ── */}
         {step === 3 && (
           <div className="book-step3">
             <div className="book-layout">
               <div className="confirm-box">
                 <h2>Confirm Your Booking</h2>
                 <p className="confirm-note">
-                  Review your details below. A <strong>50% deposit (£{chosen ? Math.round(chosen.price * 0.5) : '—'})</strong> is required via Stripe to secure your date.
+                  Review your details. A <strong>50% deposit (£{chosen ? Math.round(chosen.price * 0.5) : '—'})</strong> is required via Stripe to secure your date.
                 </p>
 
                 <div className="confirm-grid">
@@ -280,20 +362,21 @@ export default function Booking() {
                 </div>
 
                 <div className="payment-info">
-                  <h3>💳 How Payment Works</h3>
-                  <p>After submitting, you'll receive a <strong>Stripe payment link</strong> by email to pay your deposit. Stripe supports all major cards, Apple Pay &amp; Google Pay — quick and secure. The remaining balance is due on the day.</p>
+                  <h3>💳 Pay Your Deposit Now</h3>
+                  <p>After confirming, you'll pay your <strong>50% deposit directly here</strong> using our secure embedded checkout. Accepts all cards, Apple Pay &amp; Google Pay. Your date is only secured once payment is complete.</p>
                 </div>
 
                 {status === 'error' && (
                   <div className="form-err-banner">
-                    Something went wrong. Please try again or email us at {BRAND.email}
+                    Something went wrong saving your booking. Please try again or contact us at {BRAND.email}
                   </div>
                 )}
+
 
                 <div className="step3-nav">
                   <button type="button" className="btn-outline" onClick={() => setStep(2)}>← Edit Details</button>
                   <button type="submit" className="btn-primary" disabled={status === 'loading'}>
-                    {status === 'loading' ? 'Submitting…' : 'Confirm & Submit →'}
+                    {status === 'loading' ? 'Saving…' : 'Confirm & Pay Deposit →'}
                   </button>
                 </div>
               </div>
@@ -303,6 +386,32 @@ export default function Booking() {
           </div>
         )}
       </form>
+
+      {/* ── STEP 4: Payment — outside form to avoid nested form error ── */}
+      {status === 'payment' && (
+        <div className="book-body wrap">
+          <div className="book-step4">
+            <div className="book-layout">
+              <div>
+                <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 400, textTransform: 'uppercase', color: 'var(--text)', marginBottom: 8 }}>Pay Your Deposit</h2>
+                <p style={{ fontSize: 15, color: 'var(--text-2)', marginBottom: 28, lineHeight: 1.7 }}>
+                  A 50% deposit secures your date. The remaining balance is due on the day of your session.
+                </p>
+                <StripeCheckout
+                  booking={{ ...savedBooking, name: form.name, email: form.email }}
+                  chosen={chosen}
+                  onSuccess={async (paymentIntent) => {
+                    await sendConfirmEmail(chosen)
+                    setStatus('success')
+                  }}
+                  onCancel={() => { setStatus('idle'); setStep(3) }}
+                />
+              </div>
+              <BookingSidebar chosen={chosen} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -332,9 +441,9 @@ function BookingSidebar({ chosen }) {
       <div className="sidebar-card">
         <h4>What happens next?</h4>
         <ol className="sidebar-steps">
-          <li><span>01</span><div><strong>We confirm</strong><p>Hear from us within 24 hours to confirm availability.</p></div></li>
-          <li><span>02</span><div><strong>Pay deposit via Stripe</strong><p>Secure Stripe link sent by email — all cards, Apple &amp; Google Pay.</p></div></li>
-          <li><span>03</span><div><strong>48hr reminder</strong><p>Email reminder sent before your session with everything you need.</p></div></li>
+          <li><span>01</span><div><strong>Fill your details</strong><p>Tell us about your session — date, location, outfits.</p></div></li>
+          <li><span>02</span><div><strong>Pay deposit here</strong><p>Secure embedded checkout — cards, Apple Pay &amp; Google Pay.</p></div></li>
+          <li><span>03</span><div><strong>Automated reminder</strong><p>Email sent 48hrs before your shoot with everything you need.</p></div></li>
           <li><span>04</span><div><strong>Shoot day!</strong><p>Arrive, relax, and let us do the rest.</p></div></li>
         </ol>
       </div>
@@ -354,21 +463,21 @@ function BookingSuccess({ form, chosen }) {
       <div className="book-success">
         <div className="wrap book-success__inner">
           <div className="success-icon">✓</div>
-          <p className="label">Booking Received</p>
-          <h1>You're All Set, {form.name.split(' ')[0]}!</h1>
+          <p className="label">Deposit Paid · Booking Confirmed</p>
+          <h1>You're booked, {form.name.split(' ')[0]}! 🎉</h1>
           <p className="success-msg">
-            We'll be in touch within 24 hours at <strong>{form.email}</strong> to confirm your session and send your Stripe deposit link.
+            Your deposit has been paid and your date is secured. A confirmation has been sent to <strong>{form.email}</strong>.
           </p>
           {chosen && (
             <div className="success-pkg">
               <div>{chosen.emoji || '📸'} <strong>{chosen.name}</strong></div>
-              <div>Preferred Date: <strong>{form.preferred_date ? format(new Date(form.preferred_date), 'd MMMM yyyy') : '—'}</strong></div>
-              <div>Total: <strong>£{chosen.price}</strong> · Deposit: <strong>£{Math.round(chosen.price * 0.5)}</strong></div>
+              <div>Date: <strong>{form.preferred_date ? format(new Date(form.preferred_date), 'd MMMM yyyy') : '—'}</strong></div>
+              <div>Deposit paid: <strong>£{Math.round(chosen.price * 0.5)}</strong> · Remaining on day: <strong>£{Math.round(chosen.price * 0.5)}</strong></div>
             </div>
           )}
           <div className="success-reminder">
             <span>🔔</span>
-            <p>You'll receive an automated <strong>reminder 48 hours before</strong> your session with everything you need to know.</p>
+            <p>You'll receive an automatic <strong>reminder before your session</strong> with everything you need to know.</p>
           </div>
           <a href="/" className="btn-primary" style={{ marginTop: 8 }}>Back to Home</a>
         </div>

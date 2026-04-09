@@ -68,6 +68,8 @@ export default function Admin() {
   const [expandedBooking, setExpandedBooking] = useState(null)
   const [cancelTarget, setCancelTarget]     = useState(null)
   const [cancelling, setCancelling]         = useState(false)
+  const [deleteBookingTarget, setDeleteBookingTarget] = useState(null)
+  const [deletingBooking, setDeletingBooking] = useState(false)
   const [bookingFetchError, setBookingFetchError] = useState('')
 
   useEffect(() => {
@@ -213,6 +215,16 @@ export default function Admin() {
     if (!deletePkg) return
     await supabase.from('packages').delete().eq('id', deletePkg.id)
     setDeletePkg(null); loadPackages()
+  }
+
+  async function confirmDeleteBooking() {
+    if (!deleteBookingTarget) return
+    setDeletingBooking(true)
+    await supabase.from('bookings').delete().eq('id', deleteBookingTarget.id)
+    setBookings(b => b.filter(bk => bk.id !== deleteBookingTarget.id))
+    if (expandedBooking === deleteBookingTarget.id) setExpandedBooking(null)
+    setDeleteBookingTarget(null)
+    setDeletingBooking(false)
   }
 
   // ── Booking handlers ─────────────────────────────────────
@@ -662,6 +674,13 @@ export default function Admin() {
                                   ✕ Cancel Booking
                                 </button>
                               )}
+                              <button
+                                className="adm__btn-delete-booking"
+                                onClick={() => setDeleteBookingTarget(b)}
+                                title="Permanently delete this booking"
+                              >
+                                🗑 Delete
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -669,6 +688,25 @@ export default function Admin() {
                     </div>
                   )
                 })}
+              </div>
+            )}
+
+            {/* Delete booking modal */}
+            {deleteBookingTarget && (
+              <div className="adm__modal-overlay" onClick={() => setDeleteBookingTarget(null)}>
+                <div className="adm__modal" onClick={e => e.stopPropagation()}>
+                  <h3>Delete Booking?</h3>
+                  <p>
+                    This will <strong>permanently delete</strong> the booking for <strong>{deleteBookingTarget.name}</strong> ({deleteBookingTarget.package_name || 'unknown package'}).
+                    This cannot be undone and the record will be gone forever.
+                  </p>
+                  <div className="adm__modal-actions">
+                    <button className="btn-outline" onClick={() => setDeleteBookingTarget(null)}>Cancel</button>
+                    <button className="adm__btn-danger" onClick={confirmDeleteBooking} disabled={deletingBooking}>
+                      {deletingBooking ? 'Deleting…' : 'Delete Forever'}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 

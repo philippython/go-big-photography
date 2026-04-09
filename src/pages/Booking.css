@@ -19,7 +19,6 @@
 .book-steps {
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
-  margin-bottom: 20px;
 }
 .book-steps__inner {
   display: flex; gap: 0;
@@ -335,4 +334,10 @@
   .confirm-grid { grid-template-columns: 1fr; }
   .book-step span:last-child { display: none; }
   .pkg-grid { grid-template-columns: 1fr; }
+}
+
+.form-err-banner--email {
+  border-color: rgba(245,158,11,0.3);
+  background: rgba(245,158,11,0.08);
+  color: #f59e0b;
 }
