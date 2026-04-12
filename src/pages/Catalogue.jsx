@@ -81,7 +81,9 @@ export default function Catalogue() {
                 onClick={() => openLightbox(p)}
                 style={{ animationDelay: `${(i % 9) * 0.06}s` }}
               >
-                <img src={p.image_url} alt={p.title} loading="lazy" />
+                <div className="cat-photo__img-wrap">
+                  <img src={p.image_url} alt={p.title} loading="lazy" />
+                </div>
                 <div className="cat-photo__overlay">
                   <span className="label">{CATEGORIES.find(c => c.id === p.category)?.label || p.category}</span>
                   <h3>{p.title}</h3>
