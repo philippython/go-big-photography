@@ -37,9 +37,18 @@ export default function Booking() {
       .from('bookings')
       .select('preferred_date')
       .not('preferred_date', 'is', null)
-      .not('status', 'in', '(cancelled,declined)')
-      .then(({ data }) => {
-        if (data) setBookedDates(data.map(b => b.preferred_date))
+      .in('status', ['new', 'contacted', 'confirmed', 'completed'])
+      .then(({ data, error }) => {
+        if (error) { console.error('bookedDates fetch error:', error); return }
+        if (data) {
+          const dates = data
+            .map(b => b.preferred_date)
+            .filter(Boolean)
+            // Normalise to yyyy-MM-dd in case Supabase returns full timestamp
+            .map(d => d.slice(0, 10))
+          console.log('Booked dates loaded:', dates)
+          setBookedDates(dates)
+        }
       })
   }, [])
 
@@ -124,37 +133,29 @@ export default function Booking() {
     e.preventDefault()
     const errs = validate()
     if (Object.keys(errs).length) { setErrors(errs); setStep(2); return }
+    // Just go to payment — booking saves ONLY after successful payment
+    setStatus('payment')
+  }
 
-    setStatus('loading')
+  async function saveBookingAfterPayment(paymentIntent) {
     const pkg = chosen
-
-    // Save booking to Supabase
-    const { error } = await supabase.from('bookings').insert([{
-      ...form,
-      package_name:  pkg?.name  || form.package_id,
-      package_price: pkg?.price || null,
-      deposit_due:   pkg?.price ? Math.round(pkg.price * 0.5) : null,
-      created_at:    new Date().toISOString(),
-      status:        'new',
-    }])
-
-    if (error) {
-      console.error(error)
-      setStatus('error')
-      return
-    }
-
-    // Get the saved booking id for Stripe metadata
-    const { data: saved } = await supabase
+    const { data: saved, error } = await supabase
       .from('bookings')
+      .insert([{
+        ...form,
+        package_name:       pkg?.name  || form.package_id,
+        package_price:      pkg?.price || null,
+        deposit_due:        pkg?.price ? Math.round(pkg.price * 0.5) : null,
+        deposit_paid:       true,
+        stripe_payment_id:  paymentIntent?.id || null,
+        created_at:         new Date().toISOString(),
+        status:             'confirmed',
+      }])
       .select('id')
-      .eq('email', form.email)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()  // won't throw 406 if row not found
+      .single()
 
-    setSavedBooking(saved || {})
-    setStatus('payment') // go to payment step
+    if (error) console.error('Booking save error:', error)
+    return saved
   }
 
   if (status === 'success') return <BookingSuccess form={form} chosen={chosen} />
@@ -401,7 +402,11 @@ export default function Booking() {
                   booking={{ ...savedBooking, name: form.name, email: form.email }}
                   chosen={chosen}
                   onSuccess={async (paymentIntent) => {
+                    // 1. Save booking now that payment succeeded
+                    await saveBookingAfterPayment(paymentIntent)
+                    // 2. Send confirmation email
                     await sendConfirmEmail(chosen)
+                    // 3. Show success screen
                     setStatus('success')
                   }}
                   onCancel={() => { setStatus('idle'); setStep(3) }}
